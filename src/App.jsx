@@ -70,6 +70,56 @@ export default function App() {
   const [gameAnswer, setGameAnswer] = useState("");
   const [gameScore, setGameScore] = useState(0);
   const [fileMessage, setFileMessage] = useState("");
+  const [studyText, setStudyText] = useState(() => localStorage.getItem("rgen-study-text") || "");
+  const [studyItems, setStudyItems] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("rgen-study-items") || "[]"); }
+    catch { return []; }
+  });
+  const [gameChoice, setGameChoice] = useState("");
+  const [gameRound, setGameRound] = useState(0);
+
+  useEffect(() => {
+    localStorage.setItem("rgen-study-text", studyText);
+    localStorage.setItem("rgen-study-items", JSON.stringify(studyItems));
+  }, [studyText, studyItems]);
+
+  const activeCards = studyItems.length ? studyItems : starterCards;
+  const activeQuestions = studyItems.length
+    ? studyItems.map((item, index) => ({
+        question: `What is ${item.q}?`,
+        options: [item.a, ...studyItems.filter((x, i) => i !== index).slice(0, 3).map(x => x.a)],
+        answer: item.a,
+        explanation: item.a
+      }))
+    : starterQuestions;
+  const gameOptions = [
+    activeCards[gameRound % activeCards.length],
+    ...activeCards.filter((item, index) => index !== gameRound % activeCards.length).slice(0, 3)
+  ];
+  const safeQuestion = activeQuestions[Math.min(questionIndex, activeQuestions.length - 1)];
+  const safeCard = activeCards[Math.min(cardIndex, activeCards.length - 1)];
+
+  function createStudySet() {
+    const parsed = studyText.split(/\\n+/).map(line => line.trim()).filter(Boolean)
+      .map(line => {
+        const splitAt = line.indexOf(":");
+        return splitAt > 0 ? { q: line.slice(0, splitAt).trim(), a: line.slice(splitAt + 1).trim() } : null;
+      }).filter(item => item && item.q && item.a);
+    if (parsed.length < 2) {
+      setFileMessage("Please add at least 2 lines in Term: Definition format.");
+      return;
+    }
+    setStudyItems(parsed);
+    setQuestionIndex(0); setAnswer(""); setScore(0); setFinished(false);
+    setCardIndex(0); setFlipped(false); setGameRound(0); setGameChoice("");
+    setFileMessage(`${parsed.length} study concepts added. Quiz, flashcards and game are ready!`);
+  }
+
+  function clearStudySet() {
+    setStudyText(""); setStudyItems([]); setFileMessage("");
+    setQuestionIndex(0); setAnswer(""); setScore(0); setFinished(false);
+    setCardIndex(0); setFlipped(false); setGameRound(0); setGameChoice("");
+  }
 
   useEffect(() => {
     localStorage.setItem("rgen-saved", JSON.stringify(saved));
@@ -176,10 +226,10 @@ export default function App() {
 
   function submitAnswer() {
     if (!answer) return;
-    if (answer === starterQuestions[questionIndex].answer) {
+    if (answer === activeQuestions[questionIndex].answer) {
       setScore(s => s + 1);
     }
-    if (questionIndex === starterQuestions.length - 1) {
+    if (questionIndex === activeQuestions.length - 1) {
       setFinished(true);
     } else {
       setQuestionIndex(i => i + 1);
@@ -192,8 +242,8 @@ export default function App() {
     setGameScore(0);
   }
 
-  const currentQuestion = starterQuestions[questionIndex];
-  const currentCard = starterCards[cardIndex];
+  const currentQuestion = safeQuestion;
+  const currentCard = safeCard;
 
   return (
     <div className={dark ? "app dark" : "app"}>
@@ -357,17 +407,18 @@ export default function App() {
 
         {page === "Quiz" && (
           <section className="panel">
-            <span className="pill">PRACTICE QUIZ · SAMPLE QUESTIONS</span>
-            <h2>Test your knowledge</h2>
+            <span className="pill">PRACTICE QUIZ</span>
+            <h2>Test your understanding</h2>
+            <p className="muted">{studyItems.length ? `Your custom study set · ${studyItems.length} concepts` : "Starter practice set. Add your own concepts below to create a custom quiz."}</p>
             {finished ? (
               <>
-                <h1>{score} / {starterQuestions.length}</h1>
+                <h1>{score} / {activeQuestions.length}</h1>
                 <p>Your practice score</p>
                 <button className="primaryButton" onClick={resetQuiz}><RotateCcw size={16}/> Try again</button>
               </>
             ) : (
               <>
-                <small>Question {questionIndex + 1} of {starterQuestions.length}</small>
+                <small>Question {questionIndex + 1} of {activeQuestions.length}</small>
                 <h3>{currentQuestion.question}</h3>
                 {currentQuestion.options.map(option => (
                   <button key={option} className={`option ${answer === option ? "chosen" : ""}`} onClick={() => setAnswer(option)}>{option}</button>
@@ -375,67 +426,51 @@ export default function App() {
                 <button className="primaryButton" disabled={!answer} onClick={submitAnswer}>Submit answer</button>
               </>
             )}
+            <div className="studyBuilder">
+              <h3>Create your own study set</h3>
+              <p>Har line mein ek concept likho: <b>Term: Definition</b></p>
+              <textarea value={studyText} onChange={e => setStudyText(e.target.value)} placeholder={"DNA: Stores hereditary information\nGene: Unit of heredity\nChloroplast: Site of photosynthesis"} />
+              <div className="buttonWrap">
+                <button className="primaryButton" onClick={createStudySet}>Create Quiz + Cards + Game</button>
+                <button className="secondaryButton" onClick={clearStudySet}>Clear custom set</button>
+              </div>
+              {fileMessage && <p className="notice">{fileMessage}</p>}
+            </div>
           </section>
         )}
 
         {page === "Flashcards" && (
           <section className="panel">
-            <span className="pill">SAMPLE FLASHCARDS</span>
+            <span className="pill">FLASHCARD REVISION</span>
             <h2>Revise your concepts</h2>
+            <p className="muted">{studyItems.length ? "Custom flashcards from your study set" : "Starter flashcards. Add concepts in Quiz to make your own."}</p>
             <button className="flashcard" onClick={() => setFlipped(v => !v)}>
-              <small>{flipped ? "ANSWER" : "QUESTION"} · Click to flip</small>
+              <small>{flipped ? "ANSWER" : "QUESTION"} · Tap to flip</small>
               <h2>{flipped ? currentCard.a : currentCard.q}</h2>
             </button>
             <div className="buttonWrap">
-              <button className="secondaryButton" onClick={() => {setCardIndex(i => (i + starterCards.length - 1) % starterCards.length); setFlipped(false);}}>Previous</button>
-              <button className="primaryButton" onClick={() => {setCardIndex(i => (i + 1) % starterCards.length); setFlipped(false);}}>Next card</button>
+              <button className="secondaryButton" onClick={() => {setCardIndex(i => (i + activeCards.length - 1) % activeCards.length); setFlipped(false);}}>Previous</button>
+              <button className="primaryButton" onClick={() => {setCardIndex(i => (i + 1) % activeCards.length); setFlipped(false);}}>Next card</button>
             </div>
-            <small>Card {cardIndex + 1} of {starterCards.length}</small>
+            <small>Card {cardIndex + 1} of {activeCards.length}</small>
+            <div className="studyBuilder">
+              <h3>Add concepts</h3>
+              <p>Quiz page par Term: Definition format mein concepts paste karo. Yahi cards yahan show honge.</p>
+              <button className="secondaryButton" onClick={() => setPage("Quiz")}>Open study set creator</button>
+            </div>
           </section>
         )}
 
         {page === "Games" && (
           <section className="panel">
-            <span className="pill">QUICK LEARNING GAME</span>
-            <h2>True or False?</h2>
-            <p>DNA carries hereditary information.</p>
-            <div className="buttonWrap">
-              <button className="primaryButton" onClick={() => {setGameAnswer("True"); setGameScore(1);}}>True</button>
-              <button className="secondaryButton" onClick={() => {setGameAnswer("False"); setGameScore(0);}}>False</button>
-            </div>
-            {gameAnswer && <p className="notice">{gameAnswer === "True" ? "Correct! You earned 1 point." : "Not quite. The correct answer is True."} Score: {gameScore}</p>}
-            <button className="secondaryButton" onClick={startGame}>Reset game</button>
-          </section>
-        )}
-
-        {page === "Notes" && (
-          <section>
-            <div className="panel">
-              <h2>Your study notes</h2>
-              <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Write your notes here..."/>
-              <button className="primaryButton" onClick={addNote}>Save note</button>
-            </div>
-            {notes.map(note => (
-              <article className="paperCard" key={note.id}>
-                <small>{note.date}</small><p>{note.text}</p>
-                <button className="secondaryButton" onClick={() => setNotes(old => old.filter(n => n.id !== note.id))}><Trash2 size={15}/> Delete</button>
-              </article>
+            <span className="pill">LEARNING GAME</span>
+            <h2>Match the concept</h2>
+            <p>Choose the correct definition for this term:</p>
+            <h3>{activeCards[gameRound % activeCards.length].q}</h3>
+            {gameOptions.map((item, index) => (
+              <button key={`${item.q}-${index}`} className={`option ${gameChoice === item.a ? "chosen" : ""}`} onClick={() => {
+                setGameChoice(item.a);
+                if (item.a === activeCards[gameRound % activeCards.length].a) setGameScore(s => s + 1);
+              }}>{item.a}</button>
             ))}
-          </section>
-        )}
-
-        {page === "Settings" && (
-          <section className="panel">
-            <h2>Settings</h2>
-            <p>Theme: {dark ? "Dark" : "Light"}</p>
-            <button className="secondaryButton" onClick={() => setDark(v => !v)}>Switch theme</button>
-            <h3>Project status</h3>
-            <p>Research search: connected through serverless endpoint.</p>
-            <p>AI provider: not configured.</p>
-            <p>Saved papers and notes: stored in this browser.</p>
-          </section>
-        )}
-      </main>
-    </div>
-  );
-                  }
+            {gameChoice && <p className="notice">{gameChoice === activeCards[gameRound % activeCards.length].a ? "Correct! Great work." : `Not quite. Correct answer: ${activeCards[gameRound % activeCards.le
