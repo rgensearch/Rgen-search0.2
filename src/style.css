@@ -442,3 +442,7 @@ button:disabled {
   .searchBox .primaryButton { padding: 10px; }
   .paperCard, .panel { padding: 17px; }
     }
+
+.studyBuilder { margin-top: 28px; padding-top: 22px; border-top: 1px solid #ece9f3; }
+.studyBuilder textarea { width: 100%; min-height: 130px; resize: vertical; padding: 13px; border: 1px solid #e5e0ef; border-radius: 12px; outline: none; background: white; color: #302b44; line-height: 1.6; }
+.studyBuilder p { color: #89839a; font-size: 13px; }
