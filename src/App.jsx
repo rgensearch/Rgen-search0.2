@@ -100,7 +100,7 @@ export default function App() {
   const safeCard = activeCards[Math.min(cardIndex, activeCards.length - 1)];
 
   function createStudySet() {
-    const parsed = studyText.split(/\\n+/).map(line => line.trim()).filter(Boolean)
+    const parsed = studyText.split(/\n+/).map(line => line.trim()).filter(Boolean)
       .map(line => {
         const splitAt = line.indexOf(":");
         return splitAt > 0 ? { q: line.slice(0, splitAt).trim(), a: line.slice(splitAt + 1).trim() } : null;
