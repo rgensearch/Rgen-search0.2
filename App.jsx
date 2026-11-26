@@ -1,0 +1,632 @@
+import { useEffect, useState } from "react";
+import {
+  Search, Plus, Home, Library, Brain, Layers, Gamepad2,
+  NotebookPen, Settings, BookOpen, Upload, Sparkles,
+  CheckCircle, Moon, Sun, Trash2, ExternalLink, X,
+  ChevronRight, RotateCcw, FileText
+} from "lucide-react";
+
+const starterQuestions = [
+  {
+    question: "Which molecule carries genetic information in most living organisms?",
+    options: ["Protein", "DNA", "Lipid", "Carbohydrate"],
+    answer: "DNA",
+    explanation: "DNA stores hereditary information in most living organisms."
+  },
+  {
+    question: "Which organelle is mainly responsible for photosynthesis?",
+    options: ["Mitochondria", "Nucleus", "Chloroplast", "Ribosome"],
+    answer: "Chloroplast",
+    explanation: "Chloroplast contains chlorophyll and performs photosynthesis."
+  },
+  {
+    question: "What is the basic unit of heredity?",
+    options: ["Cell", "Gene", "Tissue", "Organ"],
+    answer: "Gene",
+    explanation: "A gene is a unit of hereditary information."
+  }
+];
+
+const starterCards = [
+  { q: "What is DNA?", a: "DNA is the molecule that stores hereditary information." },
+  { q: "What is a gene?", a: "A gene is a segment of DNA that carries hereditary information." },
+  { q: "What is photosynthesis?", a: "The process by which green plants use light energy to make food." }
+];
+
+const menu = [
+  ["Home", Home],
+  ["Research", Search],
+  ["Library", Library],
+  ["AI Workspace", Brain],
+  ["Quiz", CheckCircle],
+  ["Flashcards", Layers],
+  ["Games", Gamepad2],
+  ["Notes", NotebookPen],
+  ["Settings", Settings]
+];
+
+export default function App() {
+  const [page, setPage] = useState("Home");
+  const [query, setQuery] = useState("");
+  const [papers, setPapers] = useState([]);
+  const [selected, setSelected] = useState([]);
+  const [saved, setSaved] = useState(() =>
+    JSON.parse(localStorage.getItem("rgen-saved") || "[]")
+  );
+  const [notes, setNotes] = useState(() =>
+    JSON.parse(localStorage.getItem("rgen-notes") || "[]")
+  );
+  const [noteText, setNoteText] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [aiMessage, setAiMessage] = useState("");
+  const [aiResult, setAiResult] = useState("");
+  const [uploadedText, setUploadedText] = useState("");
+  const [uploadedName, setUploadedName] = useState("");
+  const [aiGeneratedQuiz, setAiGeneratedQuiz] = useState([]);
+  const [aiGeneratedCards, setAiGeneratedCards] = useState([]);
+  const [dark, setDark] = useState(false);
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const [answer, setAnswer] = useState("");
+  const [score, setScore] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const [cardIndex, setCardIndex] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+  const [gameAnswer, setGameAnswer] = useState("");
+  const [gameScore, setGameScore] = useState(0);
+  const [fileMessage, setFileMessage] = useState("");
+  const [studyText, setStudyText] = useState(() => localStorage.getItem("rgen-study-text") || "");
+  const [studyItems, setStudyItems] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("rgen-study-items") || "[]"); }
+    catch { return []; }
+  });
+  const [gameChoice, setGameChoice] = useState("");
+  const [gameRound, setGameRound] = useState(0);
+
+  useEffect(() => {
+    localStorage.setItem("rgen-study-text", studyText);
+    localStorage.setItem("rgen-study-items", JSON.stringify(studyItems));
+  }, [studyText, studyItems]);
+
+  const activeCards = aiGeneratedCards.length ? aiGeneratedCards : (studyItems.length ? studyItems : starterCards);
+  const activeQuestions = aiGeneratedQuiz.length ? aiGeneratedQuiz : (studyItems.length
+    ? studyItems.map((item, index) => ({
+        question: `What is ${item.q}?`,
+        options: [item.a, ...studyItems.filter((x, i) => i !== index).slice(0, 3).map(x => x.a)],
+        answer: item.a,
+        explanation: item.a
+      }))
+    : starterQuestions);
+  const gameOptions = [
+    activeCards[gameRound % activeCards.length],
+    ...activeCards.filter((item, index) => index !== gameRound % activeCards.length).slice(0, 3)
+  ];
+  const safeQuestion = activeQuestions[Math.min(questionIndex, activeQuestions.length - 1)];
+  const safeCard = activeCards[Math.min(cardIndex, activeCards.length - 1)];
+
+  function createStudySet() {
+    const parsed = studyText.split(/\n+/).map(line => line.trim()).filter(Boolean)
+      .map(line => {
+        const splitAt = line.indexOf(":");
+        return splitAt > 0 ? { q: line.slice(0, splitAt).trim(), a: line.slice(splitAt + 1).trim() } : null;
+      }).filter(item => item && item.q && item.a);
+    if (parsed.length < 2) {
+      setFileMessage("Please add at least 2 lines in Term: Definition format.");
+      return;
+    }
+    setStudyItems(parsed);
+    setAiGeneratedQuiz([]); setAiGeneratedCards([]);
+    setQuestionIndex(0); setAnswer(""); setScore(0); setFinished(false);
+    setCardIndex(0); setFlipped(false); setGameRound(0); setGameChoice("");
+    setFileMessage(`${parsed.length} study concepts added. Quiz, flashcards and game are ready!`);
+  }
+
+  function clearStudySet() {
+    setStudyText(""); setStudyItems([]); setAiGeneratedQuiz([]); setAiGeneratedCards([]); setFileMessage("");
+    setQuestionIndex(0); setAnswer(""); setScore(0); setFinished(false);
+    setCardIndex(0); setFlipped(false); setGameRound(0); setGameChoice("");
+  }
+
+  useEffect(() => {
+    localStorage.setItem("rgen-saved", JSON.stringify(saved));
+  }, [saved]);
+
+  useEffect(() => {
+    localStorage.setItem("rgen-notes", JSON.stringify(notes));
+  }, [notes]);
+
+  async function searchResearch(e) {
+    e?.preventDefault();
+    if (!query.trim()) return;
+
+    setPage("Research");
+    setLoading(true);
+    setError("");
+    setPapers([]);
+    setSelected([]);
+
+    try {
+      const response = await fetch(
+        `/api/research?q=${encodeURIComponent(query.trim())}`
+      );
+      const data = await response.json();
+
+      if (!response.ok) throw new Error(data.error || "Search failed.");
+      setPapers(data.papers || []);
+      if (!data.papers?.length) setError("No papers found. Try another topic.");
+    } catch (err) {
+      setError(err.message || "Unable to search right now.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function togglePaper(paper) {
+    setSelected(old =>
+      old.some(p => p.id === paper.id)
+        ? old.filter(p => p.id !== paper.id)
+        : [...old, paper]
+    );
+  }
+
+  function savePaper(paper) {
+    setSaved(old =>
+      old.some(p => p.id === paper.id) ? old : [...old, paper]
+    );
+  }
+
+  async function askAI(task, paperOverride = null) {
+    const usablePapers = (paperOverride || selected).filter(p => p && (p.title || p.abstract));
+    if (!usablePapers.length && !uploadedText.trim() && !query.trim()) {
+      setAiMessage("First select a research paper, upload a document, or enter a topic in Search.");
+      setAiResult("");
+      return;
+    }
+
+    setLoading(true);
+    setAiMessage("Connecting securely to Gemini. This may take a few seconds...");
+    setAiResult("");
+    try {
+      const response = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          task,
+          papers: usablePapers,
+          query,
+          uploadedText
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `AI request failed (${response.status}).`);
+      const answerText = String(data.answer || data.response || data.result || "").trim();
+      if (!answerText) throw new Error("Gemini returned an empty answer. Please try again.");
+
+      if (task === "quiz") {
+        const parsed = parseAIJson(answerText);
+        const questions = Array.isArray(parsed?.questions) ? parsed.questions : [];
+        const valid = questions.filter(q => q.question && Array.isArray(q.options) && q.options.length >= 2 && q.answer);
+        if (valid.length) {
+          setAiGeneratedQuiz(valid.map(q => ({ question: q.question, options: q.options, answer: q.answer, explanation: q.explanation || "" })));
+          setQuestionIndex(0); setAnswer(""); setScore(0); setFinished(false);
+          setPage("Quiz");
+          setAiMessage(`Your AI quiz is ready: ${valid.length} questions generated from your selected material.`);
+          setAiResult("");
+        } else {
+          setAiResult(answerText);
+          setAiMessage("Gemini responded, but the quiz format could not be converted into interactive questions. The response is shown below.");
+        }
+      } else if (task === "flashcards") {
+        const parsed = parseAIJson(answerText);
+        const cards = Array.isArray(parsed?.cards) ? parsed.cards : [];
+        const valid = cards.filter(card => card.q && card.a);
+        if (valid.length) {
+          setAiGeneratedCards(valid);
+          setCardIndex(0); setFlipped(false); setPage("Flashcards");
+          setAiMessage(`${valid.length} AI flashcards are ready from your selected material.`);
+          setAiResult("");
+        } else {
+          setAiResult(answerText);
+          setAiMessage("Gemini responded, but the flashcard format could not be converted. The response is shown below.");
+        }
+      } else if (task === "games") {
+        const parsed = parseAIJson(answerText);
+        const items = Array.isArray(parsed?.items) ? parsed.items : [];
+        const valid = items.filter(item => item.q && item.a);
+        if (valid.length) {
+          setStudyItems(valid);
+          setAiGeneratedCards([]);
+          setGameRound(0); setGameChoice(""); setGameScore(0); setPage("Games");
+          setAiMessage(`${valid.length} AI game rounds are ready from your selected material.`);
+          setAiResult("");
+        } else {
+          setAiResult(answerText);
+          setAiMessage("Gemini responded, but the game format could not be converted. The response is shown below.");
+        }
+      } else {
+        setAiMessage(`Gemini response received${data.model ? ` (${data.model})` : ""}.`);
+        setAiResult(answerText);
+      }
+    } catch (err) {
+      setAiMessage(err.message || "AI service is temporarily unavailable. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function parseAIJson(text) {
+    const cleaned = String(text).replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    try { return JSON.parse(cleaned); } catch { return null; }
+  }
+
+  function addNote() {
+    if (!noteText.trim()) return;
+    setNotes(old => [
+      { id: Date.now(), text: noteText.trim(), date: new Date().toLocaleString() },
+      ...old
+    ]);
+    setNoteText("");
+  }
+
+  async function handleUpload(files) {
+    const file = files?.[0];
+    if (!file) return;
+    if (file.size > 50 * 1024 * 1024) {
+      setFileMessage("File is larger than the 50 MB limit.");
+      return;
+    }
+    const extension = file.name.split(".").pop().toLowerCase();
+    if (!["pdf", "docx", "pptx", "txt"].includes(extension)) {
+      setFileMessage("Supported formats: PDF, DOCX, PPTX and TXT.");
+      return;
+    }
+    setLoading(true);
+    setFileMessage(`Reading ${file.name}...`);
+    try {
+      let extracted = "";
+      if (extension === "txt") {
+        extracted = await file.text();
+      } else if (extension === "docx") {
+        const mammothModule = await import("mammoth/mammoth.browser");
+        const mammoth = mammothModule.default || mammothModule;
+        const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+        extracted = result.value || "";
+      } else if (extension === "pdf") {
+        const pdfjs = await import("pdfjs-dist");
+        const worker = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
+        pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+        const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+        const pages = [];
+        for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++) {
+          const page = await pdf.getPage(pageNo);
+          const content = await page.getTextContent();
+          pages.push(content.items.map(item => item.str).join(" "));
+        }
+        extracted = pages.join("\n\n");
+      } else if (extension === "pptx") {
+        const JSZip = (await import("jszip")).default;
+        const zip = await JSZip.loadAsync(await file.arrayBuffer());
+        const slideNames = Object.keys(zip.files).filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+          .sort((a, b) => Number(a.match(/slide(\d+)/)[1]) - Number(b.match(/slide(\d+)/)[1]));
+        const slideTexts = [];
+        for (const name of slideNames) {
+          const xml = await zip.files[name].async("text");
+          const doc = new DOMParser().parseFromString(xml, "application/xml");
+          slideTexts.push(Array.from(doc.getElementsByTagName("a:t")).map(node => node.textContent).join(" "));
+        }
+        extracted = slideTexts.join("\n\n");
+      }
+      const text = extracted.replace(/\u0000/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+      if (text.length < 30) throw new Error("No readable text was found. This may be a scanned/image-only document.");
+      setUploadedText(text.slice(0, 80000));
+      setUploadedName(file.name);
+      setFileMessage(`${file.name} read successfully. ${Math.min(text.length, 80000).toLocaleString()} characters are ready for AI analysis${text.length > 80000 ? " (content shortened to fit the AI request)" : ""}.`);
+      setPage("AI Workspace");
+    } catch (err) {
+      setFileMessage(err.message || "Could not extract text from this file.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function resetQuiz() {
+    setQuestionIndex(0);
+    setAnswer("");
+    setScore(0);
+    setFinished(false);
+  }
+
+  function submitAnswer() {
+    if (!answer) return;
+    if (answer === activeQuestions[questionIndex].answer) {
+      setScore(s => s + 1);
+    }
+    if (questionIndex === activeQuestions.length - 1) {
+      setFinished(true);
+    } else {
+      setQuestionIndex(i => i + 1);
+      setAnswer("");
+    }
+  }
+
+  function startGame() {
+    setGameAnswer("");
+    setGameScore(0);
+  }
+
+  const currentQuestion = safeQuestion;
+  const currentCard = safeCard;
+
+  return (
+    <div className={dark ? "app dark" : "app"}>
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brandIcon">R⌕</div>
+          <div><b>RGen Search</b><small>Research + AI</small></div>
+        </div>
+
+        <div className="menuLabel">WORKSPACE</div>
+        {menu.map(([name, Icon]) => (
+          <button
+            key={name}
+            className={`navItem ${page === name ? "active" : ""}`}
+            onClick={() => setPage(name)}
+          >
+            <Icon size={18} /> {name}
+          </button>
+        ))}
+
+        <div className="sidebarBottom">
+          <div className="aiStatus"><Sparkles size={16}/> Gemini AI workspace</div>
+          <small>RGen Search · Study smarter</small>
+        </div>
+      </aside>
+
+      <main className="main">
+        <header className="topbar">
+          <div>
+            <span className="eyebrow">YOUR RESEARCH COMPANION</span>
+            <h2>{page}</h2>
+          </div>
+          <button className="iconButton" onClick={() => setDark(v => !v)}>
+            {dark ? <Sun size={19}/> : <Moon size={19}/>}
+          </button>
+        </header>
+
+        {page === "Home" && (
+          <section>
+            <div className="hero">
+              <span className="pill"><Sparkles size={14}/> Research meets intelligent learning</span>
+              <h1>Discover knowledge.<br/><em>Learn better.</em></h1>
+              <p>Search research papers, understand concepts and build your study practice in one place.</p>
+              <form className="searchBox" onSubmit={searchResearch}>
+                <label className="uploadButton" title="Add study material">
+                  <Plus size={21}/>
+                  <input
+                    type="file"
+                    hidden
+                    accept=".pdf,.docx,.pptx,.txt"
+                    onChange={e => { handleUpload(e.target.files); e.target.value = ""; }}
+                  />
+                </label>
+                <input
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="Search a topic, e.g. Plant Genetics..."
+                />
+                <button className="primaryButton" type="submit">
+                  <Search size={17}/> Search
+                </button>
+              </form>
+              {fileMessage && <p className="notice">{fileMessage}</p>}
+              <small>Search research papers using Crossref. Upload limit: 50 MB per file.</small>
+            </div>
+
+            <h3 className="sectionTitle">Your study workspace</h3>
+            <div className="featureGrid">
+              {[
+                ["Research","Find academic papers","Search"],
+                ["Library","Your saved papers","Library"],
+                ["AI Workspace","Summaries and explanations","Brain"],
+                ["Quiz","Test your understanding","Quiz"],
+                ["Flashcards","Revise key concepts","Flashcards"],
+                ["Games","Learn through activities","Games"]
+              ].map(([title, desc, target]) => (
+                <button className="featureCard" key={title} onClick={() => setPage(target)}>
+                  <span className="featureIcon"><Sparkles size={20}/></span>
+                  <b>{title}</b><small>{desc}</small>
+                  <ChevronRight size={17}/>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {page === "Research" && (
+          <section>
+            <form className="searchBox compact" onSubmit={searchResearch}>
+              <Search size={19}/>
+              <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search research topic..."/>
+              <button className="primaryButton">Search</button>
+            </form>
+            <div className="sectionHeading">
+              <div><h3>Research papers</h3><small>{papers.length} results</small></div>
+              <button className="secondaryButton" disabled={!selected.length} onClick={() => { setPage("AI Workspace"); askAI("collective-summary"); }}>
+                <Sparkles size={16}/> Summarize selected ({selected.length})
+              </button>
+            </div>
+            {loading && <p className="notice">Searching research papers...</p>}
+            {error && <p className="notice">{error}</p>}
+            {papers.map(paper => (
+              <article className="paperCard" key={paper.id}>
+                <div className="paperTop">
+                  <label className="checkLabel">
+                    <input type="checkbox" checked={selected.some(p => p.id === paper.id)} onChange={() => togglePaper(paper)}/>
+                    Select
+                  </label>
+                  <span className="sourceTag">{paper.source}</span>
+                </div>
+                <h3>{paper.title}</h3>
+                <p>{paper.authors?.join(", ") || "Authors not listed"}</p>
+                <small>{paper.journal} · {paper.year}</small>
+                {paper.abstract && <p className="abstract">{paper.abstract.replace(/<[^>]*>/g, "").slice(0, 450)}</p>}
+                <div className="paperActions">
+                  <button className="secondaryButton" onClick={() => savePaper(paper)}><Library size={15}/> Save</button>
+                  <button className="secondaryButton" onClick={() => { setSelected([paper]); setPage("AI Workspace"); askAI("individual-summary", [paper]); }}><Sparkles size={15}/> AI Summary</button>
+                  {paper.url && <a href={paper.url} target="_blank" rel="noreferrer"><ExternalLink size={15}/> Open paper</a>}
+                </div>
+              </article>
+            ))}
+          </section>
+        )}
+
+        {page === "Library" && (
+          <section>
+            <h3>Saved research papers</h3>
+            {!saved.length && <p className="empty">Your saved papers will appear here.</p>}
+            {saved.map(p => (
+              <article className="paperCard" key={p.id}>
+                <h3>{p.title}</h3><small>{p.journal} · {p.year}</small>
+                <div className="paperActions">
+                  {p.url && <a href={p.url} target="_blank" rel="noreferrer">Open paper</a>}
+                  <button className="secondaryButton" onClick={() => setSaved(old => old.filter(x => x.id !== p.id))}><Trash2 size={15}/> Remove</button>
+                </div>
+              </article>
+            ))}
+          </section>
+        )}
+
+        {page === "AI Workspace" && (
+          <section>
+            <div className="panel">
+              <span className="pill"><Sparkles size={14}/> AI WORKSPACE</span>
+              <h2>Turn research into understanding.</h2>
+              <p>Choose a paper or select multiple papers in Research to prepare an AI task.</p>
+              <p><b>Selected papers:</b> {selected.length}</p>
+              <div className="buttonWrap">
+                <button className="primaryButton" disabled={loading} onClick={() => askAI("individual-summary")}>Individual summary</button>
+                <button className="primaryButton" onClick={() => askAI("collective-summary")} disabled={loading || selected.length < 2}>Collective summary</button>
+                <button className="secondaryButton" disabled={loading} onClick={() => askAI("easy-explanation")}>Easy explanation</button>
+                <button className="secondaryButton" disabled={loading} onClick={() => askAI("quiz")}>Generate AI quiz</button>
+                <button className="secondaryButton" disabled={loading} onClick={() => askAI("flashcards")}>Generate flashcards</button>
+                <button className="secondaryButton" disabled={loading} onClick={() => askAI("games")}>Generate games</button>
+              </div>
+              {uploadedName && <p className="notice">Uploaded document: <b>{uploadedName}</b> · Text extracted and ready for AI</p>}
+              {aiMessage && <p className="notice">{aiMessage}</p>}
+              {aiResult && <div className="aiOutput"><h3>AI result</h3><pre>{aiResult}</pre></div>}
+              <p className="muted">Your Gemini API key stays on the server. Select papers or upload a readable document before generating an answer.</p>
+            </div>
+          </section>
+        )}
+
+        {page === "Quiz" && (
+          <section className="panel">
+            <span className="pill">PRACTICE QUIZ</span>
+            <h2>Test your understanding</h2>
+            <p className="muted">{studyItems.length ? `Your custom study set · ${studyItems.length} concepts` : "Starter practice set. Add your own concepts below to create a custom quiz."}</p>
+            {finished ? (
+              <>
+                <h1>{score} / {activeQuestions.length}</h1>
+                <p>Your practice score</p>
+                <button className="primaryButton" onClick={resetQuiz}><RotateCcw size={16}/> Try again</button>
+              </>
+            ) : (
+              <>
+                <small>Question {questionIndex + 1} of {activeQuestions.length}</small>
+                <h3>{currentQuestion.question}</h3>
+                {currentQuestion.options.map(option => (
+                  <button key={option} className={`option ${answer === option ? "chosen" : ""}`} onClick={() => setAnswer(option)}>{option}</button>
+                ))}
+                <button className="primaryButton" disabled={!answer} onClick={submitAnswer}>Submit answer</button>
+                {answer && <p className="muted">{answer === currentQuestion.answer ? "Correct answer selected." : "Answer selected. Submit to continue."}</p>}
+              </>
+            )}
+            <div className="studyBuilder">
+              <h3>Create your own study set</h3>
+              <p>Har line mein ek concept likho: <b>Term: Definition</b></p>
+              <textarea value={studyText} onChange={e => setStudyText(e.target.value)} placeholder={"DNA: Stores hereditary information\nGene: Unit of heredity\nChloroplast: Site of photosynthesis"} />
+              <div className="buttonWrap">
+                <button className="primaryButton" onClick={createStudySet}>Create Quiz + Cards + Game</button>
+                <button className="secondaryButton" onClick={clearStudySet}>Clear custom set</button>
+              </div>
+              {fileMessage && <p className="notice">{fileMessage}</p>}
+            </div>
+          </section>
+        )}
+
+        {page === "Flashcards" && (
+          <section className="panel">
+            <span className="pill">FLASHCARD REVISION</span>
+            <h2>Revise your concepts</h2>
+            <p className="muted">{studyItems.length ? "Custom flashcards from your study set" : "Starter flashcards. Add concepts in Quiz to make your own."}</p>
+            <button className="flashcard" onClick={() => setFlipped(v => !v)}>
+              <small>{flipped ? "ANSWER" : "QUESTION"} · Tap to flip</small>
+              <h2>{flipped ? currentCard.a : currentCard.q}</h2>
+            </button>
+            <div className="buttonWrap">
+              <button className="secondaryButton" onClick={() => {setCardIndex(i => (i + activeCards.length - 1) % activeCards.length); setFlipped(false);}}>Previous</button>
+              <button className="primaryButton" onClick={() => {setCardIndex(i => (i + 1) % activeCards.length); setFlipped(false);}}>Next card</button>
+            </div>
+            <small>Card {cardIndex + 1} of {activeCards.length}</small>
+            <div className="studyBuilder">
+              <h3>Add concepts</h3>
+              <p>Quiz page par Term: Definition format mein concepts paste karo. Yahi cards yahan show honge.</p>
+              <button className="secondaryButton" onClick={() => setPage("Quiz")}>Open study set creator</button>
+            </div>
+          </section>
+        )}
+
+        {page === "Games" && (
+          <section className="panel">
+            <span className="pill">LEARNING GAME</span>
+            <h2>Match the concept</h2>
+            <p>Choose the correct definition for this term:</p>
+            <h3>{activeCards[gameRound % activeCards.length].q}</h3>
+            {gameOptions.map((item, index) => (
+              <button key={`${item.q}-${index}`} className={`option ${gameChoice === item.a ? "chosen" : ""}`} onClick={() => {
+                if (gameChoice) return;
+                setGameChoice(item.a);
+                if (item.a === activeCards[gameRound % activeCards.length].a) setGameScore(s => s + 1);
+              }}>{item.a}</button>
+            ))}
+            {gameChoice && <p className="notice">{gameChoice === activeCards[gameRound % activeCards.length].a ? "Correct! Great work." : `Not quite. Correct answer: ${activeCards[gameRound % activeCards.length].a}`}</p>}
+            <p><b>Points: {gameScore}</b></p>
+            <div className="buttonWrap">
+              <button className="primaryButton" onClick={() => {setGameRound(r => (r + 1) % activeCards.length); setGameChoice("");}}>Next round</button>
+              <button className="secondaryButton" onClick={startGame}>Reset game</button>
+            </div>
+            <p className="muted">Custom game questions use the concepts added on the Quiz page.</p>
+          </section>
+        )}
+
+        {page === "Notes" && (
+          <section>
+            <div className="panel">
+              <h2>Your study notes</h2>
+              <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="Write your notes here..."/>
+              <button className="primaryButton" onClick={addNote}>Save note</button>
+            </div>
+            {notes.map(note => (
+              <article className="paperCard" key={note.id}>
+                <small>{note.date}</small><p>{note.text}</p>
+                <button className="secondaryButton" onClick={() => setNotes(old => old.filter(n => n.id !== note.id))}><Trash2 size={15}/> Delete</button>
+              </article>
+            ))}
+          </section>
+        )}
+
+        {page === "Settings" && (
+          <section className="panel">
+            <h2>Settings</h2>
+            <p>Theme: {dark ? "Dark" : "Light"}</p>
+            <button className="secondaryButton" onClick={() => setDark(v => !v)}>Switch theme</button>
+            <h3>Project status</h3>
+            <p>Research search: connected through serverless endpoint.</p>
+            <p>AI provider: Gemini server endpoint configured when GEMINI_API_KEY is present in Vercel.</p>
+            <p>Saved papers and notes: stored in this browser.</p>
+          </section>
+        )}
+      </main>
+    </div>
+  );
+                  }
